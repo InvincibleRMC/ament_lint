@@ -78,18 +78,23 @@ def main(argv: List[str] = sys.argv[1:]) -> int:
         print("Could not find config file '{}'".format(args.config_file), file=sys.stderr)
         return 1
 
-    filenames = _get_files(args.paths)
+    # filenames = _get_files(args.paths)
+    filenames = args.paths
+
+    excludes = ['AMENT_IGNORE']
+
     if args.excludes:
-        filenames = [f for f in filenames
-                     if os.path.basename(f) not in args.excludes]
+        excludes.extend([f for f in filenames
+                     if os.path.basename(f) not in args.excludes])
     if not filenames:
         print('No files found', file=sys.stderr)
         return 1
 
     normal_report, error_messages, exit_code = _generate_mypy_report(
         filenames,
+        excludes,
         args.config_file,
-        args.cache_dir
+        args.cache_dir,
     )
 
     if error_messages:
@@ -135,6 +140,7 @@ def main(argv: List[str] = sys.argv[1:]) -> int:
 
 
 def _generate_mypy_report(paths: List[str],
+                          exclude_files: List[str],
                           config_file: Optional[str] = None,
                           cache_dir: str = os.devnull) -> Tuple[str, str, int]:
     mypy_argv = []
@@ -145,6 +151,9 @@ def _generate_mypy_report(paths: List[str],
     if config_file:
         mypy_argv.append('--config-file')
         mypy_argv.append(str(config_file))
+    for exclude_file in exclude_files:
+        mypy_argv.append('--exclude')
+        mypy_argv.append(exclude_file)
     mypy_argv.append('--show-error-context')
     mypy_argv.append('--show-column-numbers')
     mypy_argv += paths
@@ -215,9 +224,6 @@ def _get_files(paths: List[str]) -> List[str]:
     for path in paths:
         if os.path.isdir(path):
             for dirpath, dirnames, filenames in os.walk(path):
-                if 'AMENT_IGNORE' in dirnames + filenames:
-                    dirnames[:] = []
-                    continue
                 # ignore folder starting with . or _
                 dirnames[:] = [d for d in dirnames if d[0] not in ['.', '_']]
                 dirnames.sort()
