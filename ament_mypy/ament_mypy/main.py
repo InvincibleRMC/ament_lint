@@ -45,7 +45,7 @@ def main(argv: List[str] = sys.argv[1:]) -> int:
         nargs='*',
         default=[os.curdir],
         help='The files or directories to check. For directories files ending '
-             "in '.py' will be considered."
+             "in '.py[i]' will be considered."
     )
     parser.add_argument(
         '--exclude',
@@ -78,20 +78,22 @@ def main(argv: List[str] = sys.argv[1:]) -> int:
         print("Could not find config file '{}'".format(args.config_file), file=sys.stderr)
         return 1
 
-    # filenames = _get_files(args.paths)
-    filenames = args.paths
+    filenames = _get_files(args.paths)
+    files = args.paths
 
-    excludes = ['AMENT_IGNORE']
+    excludes = ['AMENT_IGNORE/**', '_**/', '.**/']
 
     if args.excludes:
-        excludes.extend([f for f in filenames
-                     if os.path.basename(f) not in args.excludes])
+        # https://mypy.readthedocs.io/en/stable/command_line.html#cmdoption-mypy-exclude
+        excludes.extend(args.excludes)
+        filenames = [f for f in filenames
+                     if f in args.paths or os.path.basename(f) not in args.excludes]
     if not filenames:
         print('No files found', file=sys.stderr)
         return 1
 
     normal_report, error_messages, exit_code = _generate_mypy_report(
-        filenames,
+        files,
         excludes,
         args.config_file,
         args.cache_dir,
@@ -143,7 +145,7 @@ def _generate_mypy_report(paths: List[str],
                           exclude_files: List[str],
                           config_file: Optional[str] = None,
                           cache_dir: str = os.devnull) -> Tuple[str, str, int]:
-    mypy_argv = []
+    mypy_argv: List[str] = []
     mypy_argv.append('--cache-dir')
     mypy_argv.append(str(cache_dir))
     if cache_dir == os.devnull:
@@ -224,6 +226,9 @@ def _get_files(paths: List[str]) -> List[str]:
     for path in paths:
         if os.path.isdir(path):
             for dirpath, dirnames, filenames in os.walk(path):
+                if 'AMENT_IGNORE' in dirnames + filenames:
+                    dirnames[:] = []
+                    continue
                 # ignore folder starting with . or _
                 dirnames[:] = [d for d in dirnames if d[0] not in ['.', '_']]
                 dirnames.sort()
@@ -236,7 +241,7 @@ def _get_files(paths: List[str]) -> List[str]:
                         type_stub_path = os.path.join(dirpath, filename)
                         files.append(type_stub_path)
 
-                        regular_file_path = type_stub_path.removesuffix('i')
+                        regular_file_path = type_stub_path[:-1]
                         # Use type stub over file
                         if regular_file_path in files:
                             files.remove(regular_file_path)

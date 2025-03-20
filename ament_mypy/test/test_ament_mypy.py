@@ -83,21 +83,21 @@ def mock_generate_report(mocker):
 def test__generate_mypy_report(mock_mypy_succ):
     # Test if correctly returns mypy output
     files = ['a.py', 'b.py']
-    assert ament_mypy.main._generate_mypy_report(files) == mock_mypy_succ.return_value
+    assert ament_mypy.main._generate_mypy_report(files, []) == mock_mypy_succ.return_value
 
     # Test if paths were forwarded to mypy
     args, _ = mock_mypy_succ.call_args
     assert all(file_name in args[0] for file_name in files)
 
     # Test if config file is forwarded to mypy
-    assert ament_mypy.main._generate_mypy_report(files, 'a.ini') == mock_mypy_succ.return_value
+    assert ament_mypy.main._generate_mypy_report(files, [], 'a.ini') == mock_mypy_succ.return_value
     args, _ = mock_mypy_succ.call_args
     assert len(args[0]) > 1
     assert any(args[0][i] == '--config-file' and
                args[0][i + 1] == 'a.ini' for i in range(len(args[0]) - 1))
 
     # Test if setting null cache dir prevents caching
-    assert ament_mypy.main._generate_mypy_report(files, cache_dir=os.devnull) \
+    assert ament_mypy.main._generate_mypy_report(files, [], cache_dir=os.devnull) \
         == mock_mypy_succ.return_value
     args, _ = mock_mypy_succ.call_args
     assert len(args[0]) > 1
@@ -106,7 +106,7 @@ def test__generate_mypy_report(mock_mypy_succ):
     assert '--no-incremental' in args[0]
 
     # Test if non-null cache dir uses caching
-    assert ament_mypy.main._generate_mypy_report(files, cache_dir='/tmp') \
+    assert ament_mypy.main._generate_mypy_report(files, [], cache_dir='/tmp') \
         == mock_mypy_succ.return_value
     args, _ = mock_mypy_succ.call_args
     assert len(args[0]) > 1
@@ -115,57 +115,54 @@ def test__generate_mypy_report(mock_mypy_succ):
     assert '--no-incremental' not in args[0]
 
 
-def test_main_success(mock_generate_report, use_dir):
+def test_main_success(mock_generate_report, use_dir, capsys):
     mock_generate_report.return_value = ('', '', 0)
 
     # Test that a successful lint returns 0
     assert ament_mypy.main.main([str(use_dir.join('01.py'))]) == 0
 
     # Sub-test that no other files in directory were checked, too
-    args, _ = mock_generate_report.call_args
-    assert str(use_dir.join('01.py')) in args[0]
-    assert str(use_dir.join('02.py')) not in args[0]
-    assert str(use_dir.join('03.txt')) not in args[0]
+    stdout = capsys.readouterr().out
+    assert str(use_dir.join('01.py')) in stdout
+    assert str(use_dir.join('02.py')) not in stdout
+    assert str(use_dir.join('03.txt')) not in stdout
 
     # Test that a directory recursively is checked
     assert ament_mypy.main.main([str(use_dir)]) == 0
-    args, _ = mock_generate_report.call_args
-    assert str(use_dir.join('01.py')) in args[0]
-    assert str(use_dir.join('02.py')) in args[0]
-    assert str(use_dir.join('03.py')) not in args[0]
+
+    stdout = capsys.readouterr().out
+    assert str(use_dir.join('01.py')) in stdout
+    assert str(use_dir.join('02.py')) in stdout
+    assert str(use_dir.join('03.py')) not in stdout
 
     # Test that non-'.py' files were ignored
-    assert str(use_dir.join('03.txt')) not in args[0]
+    assert str(use_dir.join('03.txt')) not in stdout
 
 
-def test_main_exclude(mock_generate_report, use_dir):
+def test_main_exclude(mock_generate_report, use_dir, capsys):
     mock_generate_report.return_value = ('', '', 0)
     # Test that excluding a file that was passed as an arg works
     assert ament_mypy.main.main([str(use_dir.join('01.py')),
                                  str(use_dir.join('02.py')),
                                  '--exclude',
                                  '02.py']) == 0
-    args, _ = mock_generate_report.call_args
-    assert str(use_dir.join('01.py')) in args[0]
-    assert str(use_dir.join('02.py')) not in args[0]
+    assert '2 files checked' in capsys.readouterr().out
 
     # Test that excluding a file when its directory was passed works
     assert ament_mypy.main.main([str(use_dir), '--exclude', '02.py']) == 0
-    args, _ = mock_generate_report.call_args
-    assert str(use_dir.join('01.py')) in args[0]
-    assert str(use_dir.join('02.py')) not in args[0]
+    assert '2 files checked' in capsys.readouterr().out
 
     # Test that an error is raised when all files are excluded
-    mock_generate_report.reset_mock()
-    assert ament_mypy.main.main(['02.py', '--exclude', '02.py'])
-    mock_generate_report.assert_not_called()
+    ament_mypy.main.main([str(use_dir), '--exclude', '01.py', '02.py', '03.py'])
+    assert 'No files found' in capsys.readouterr().err
 
 
-def test_ignore(use_dir, ignore_dir):
+def test_ignore(mock_generate_report, use_dir, ignore_dir, capsys):
     mock_generate_report.return_value = ('', '', 0)
 
     # Test if returns no error if at least one valid dir is presented
     assert ament_mypy.main.main([str(use_dir), str(ignore_dir)]) == 0
+    assert '3 files checked' in capsys.readouterr().out
 
 
 def test_fail(mocker, mock_mypy_generate_fail, use_dir):
@@ -202,17 +199,28 @@ def test_main_config_file(mock_generate_report, mocker, use_dir):
     mock_generate_report.return_value = ('', None, 0)
     assert ament_mypy.main.main([str(use_dir.join('01.py')), '--config', str(conf_file)]) == 0
     args, _ = mock_generate_report.call_args
-    assert args[1] == conf_file
+    assert args[2] == conf_file
 
     # Test program handles no config file being passed correctly
     assert ament_mypy.main.main([str(use_dir.join('01.py'))]) == 0
     args, _ = mock_generate_report.call_args
-    assert args[1] is not None
+    assert args[2] is not None
 
     # Test program raises error when invalid config file is presented
     assert ament_mypy.main.main([str(use_dir.join('01.py')),
                                  '--config',
                                  str(use_dir.join('aeiou.ini'))]) == 1
+
+
+def test_exclude_config_file(mock_generate_report, use_dir, capsys):
+    mock_generate_report.return_value = ('', '', 0)
+
+    # Test that a exclude section in a config file is handled properly
+    conf_file = use_dir.join('mypy.ini')
+    conf_file.write('[mypy]\nexclude = 01.py')
+    assert ament_mypy.main.main([str(use_dir), '--config', str(conf_file)]) == 0
+    assert capsys.readouterr().out is False
+    assert False
 
 
 def test_main_xunit(mock_mypy_generate_fail, mocker, use_dir):
